@@ -7,7 +7,9 @@ import java.util.List;
 import com.agileai.common.KeyGenerator;
 import com.agileai.domain.DataParam;
 import com.agileai.domain.DataRow;
+import com.agileai.hotweb.cache.LocalCacheServiceImpl;
 import com.agileai.hotweb.bizmoduler.core.TreeManageImpl;
+import com.agileai.hotweb.cache.CacheService;
 import com.agileai.hotweb.domain.core.Resource;
 import com.agileai.hotweb.domain.system.FuncHandler;
 import com.agileai.hotweb.domain.system.FuncMenu;
@@ -24,8 +26,10 @@ public class FunctionTreeManageImpl
 	private static final String operationMapCacheKey = "operationMap";
 	private static final String handlerMapCacheKey = "handlerMap";
 	private static final String functionIdListMapCacheKey = "functionIdListMap";
+	private static final String functionCodeIdMapCacheKey = "functionCodeIdMap";
 	
 	protected String appName = null;
+	private CacheService cacheService = null;
 	
     public FunctionTreeManageImpl() {
         super();
@@ -56,9 +60,15 @@ public class FunctionTreeManageImpl
     	return handlerMap;
     }
     @SuppressWarnings("unchecked")
-	private HashMap<String,List<String>> getCacheFunctionIdListMap(){
-    	HashMap<String,List<String>> functionIdListMap = (HashMap<String,List<String>>)getCacheService().getValue(functionIdListMapCacheKey);
-    	return functionIdListMap;
+ 	private HashMap<String,String> getCacheFunctionCodeIdMap(){
+     	HashMap<String,String> functionCodeIdMap = (HashMap<String,String>)getCacheService().getValue(functionCodeIdMapCacheKey);
+     	return functionCodeIdMap;
+     }  
+    
+    @SuppressWarnings("unchecked")
+  	private HashMap<String,List<String>> getCacheFunctionIdListMap(){
+      	HashMap<String,List<String>> functionIdListMap = (HashMap<String,List<String>>)getCacheService().getValue(functionIdListMapCacheKey);
+      	return functionIdListMap;
     }
 
     public FuncMenu getFunction(String functionId){
@@ -75,16 +85,22 @@ public class FunctionTreeManageImpl
 		List<DataRow> records = findTreeRecords(new DataParam());
 		if (records != null){
 			HashMap<String,FuncMenu> functionMap = new HashMap<String,FuncMenu>();
+			HashMap<String,String> functionCodeIdMap = new HashMap<String,String>();
 			ArrayList<FuncMenu> funcMenuList = new ArrayList<FuncMenu>();
 			for (int i=0;i < records.size();i++){
 				DataRow row = records.get(i);
 				FuncMenu funcMenu = new FuncMenu();
 				String funcId = row.stringValue("FUNC_ID");
+				String funcCode = row.stringValue("FUNC_CODE");
 				funcMenu.setFuncId(funcId);
+				funcMenu.setFuncCode(funcCode);
 				funcMenu.setFuncName(row.stringValue("FUNC_NAME"));
 				funcMenu.setFuncPid(row.stringValue("FUNC_PID"));
 				funcMenu.setFuncType(row.stringValue("FUNC_TYPE"));
 				funcMenu.setFuncIcon(row.stringValue("FUNC_ICON"));
+				funcMenu.setFuncState(row.stringValue("FUNC_STATE"));
+				funcMenu.setSubType(row.stringValue("SUB_TYPE"));
+				funcMenu.setBizFunc("Y".equalsIgnoreCase(row.stringValue("FUNC_IS_BIZ")));
 				
 				String funcUrl = null;
 
@@ -105,10 +121,13 @@ public class FunctionTreeManageImpl
 				String parentId = funcMenu.getFuncPid();
 				if (!StringUtil.isNullOrEmpty(parentId)){
 					FuncMenu parent = functionMap.get(parentId);
+					if (parent != null) {
 					parent.getChildren().add(funcMenu);
+					}
 				}
 			}
 			
+			getCacheService().putValue(functionCodeIdMapCacheKey, functionCodeIdMap);
 			getCacheService().putValue(functionMapCacheKey, functionMap);
 			getCacheService().putValue(funcMenuListCacheKey, funcMenuList);
 		}
@@ -295,6 +314,13 @@ public class FunctionTreeManageImpl
 		return operationMap.get(operationId);
 	}
 
+	public CacheService getCacheService(){
+		if (cacheService == null) {
+			this.cacheService = new LocalCacheServiceImpl();			
+		}
+		return cacheService;
+	}
+	
 	@Override
 	public void clearFuncTreeCache() {
 		getCacheService().removeValue(functionMapCacheKey);
@@ -302,6 +328,7 @@ public class FunctionTreeManageImpl
 		getCacheService().removeValue(handlerMapCacheKey);
 		getCacheService().removeValue(funcMenuListCacheKey);
 		getCacheService().removeValue(functionIdListMapCacheKey);
+		getCacheService().removeValue(functionCodeIdMapCacheKey);
 		
 		HotwebUserCacher.getInstance(appName).truncateUsers();
 	}
@@ -313,8 +340,35 @@ public class FunctionTreeManageImpl
 	}
 
 	@Override
-	public FuncHandler retrieveFuncHandler(String handlerCode) {
-		// TODO Auto-generated method stub
-		return null;
+	public FuncHandler getFuncHandler(String funcCode,String handlerCode) {
+		FuncHandler result = null;
+		String funcId = getCacheFunctionCodeIdMap().get(funcCode);
+		if (StringUtil.isNotNullNotEmpty(funcId)) {
+			FuncMenu funcMenu = getFunction(funcId);
+			if (funcMenu != null) {
+				List<FuncHandler> funcHandlers = funcMenu.getHandlers();
+				if (funcHandlers != null) {
+					for (int i=0;i < funcHandlers.size();i++) {
+						FuncHandler funcHandler = funcHandlers.get(i);
+						if (handlerCode.equals(funcHandler.getHandlerCode())) {
+							result = funcHandler;
+							break;
+						}
+					}					
+				}
+			}
+		}
+		return result;
+	}
+
+	@Override
+	public FuncMenu retrieveFunction(String functionCode) {
+		FuncMenu result = null;
+		this.init();
+		String funcId = getCacheFunctionCodeIdMap().get(functionCode);
+		if (StringUtil.isNotNullNotEmpty(funcId)) {
+			result = getFunction(funcId);
+		}
+		return result;
 	}
 }
